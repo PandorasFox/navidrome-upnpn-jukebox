@@ -156,8 +156,8 @@ func (l *Library) Sync(ctx context.Context, onProgress func(synced int)) error {
 	return nil
 }
 
-// Search searches for songs by title
-func (l *Library) Search(query string) ([]map[string]interface{}, error) {
+// Search searches for songs by title with pagination.
+func (l *Library) Search(query string, limit, offset int) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
 		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
 		FROM songs
@@ -169,8 +169,8 @@ func (l *Library) Search(query string) ([]map[string]interface{}, error) {
 				ELSE 2
 			END,
 			title
-		LIMIT 100
-	`, "%"+query+"%", query, query+"%")
+		LIMIT ? OFFSET ?
+	`, "%"+query+"%", query, query+"%", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
@@ -197,8 +197,8 @@ func (l *Library) Search(query string) ([]map[string]interface{}, error) {
 	return results, rows.Err()
 }
 
-// SearchAlbums searches for albums by name, returning grouped results
-func (l *Library) SearchAlbums(query string) ([]map[string]interface{}, error) {
+// SearchAlbums searches for albums by name, returning grouped results, with pagination.
+func (l *Library) SearchAlbums(query string, limit, offset int) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
 		SELECT album_id, album, MIN(artist), MIN(COALESCE(cover_art, '')),
 		       COUNT(*) as track_count, SUM(COALESCE(duration, 0)) as total_duration
@@ -206,8 +206,8 @@ func (l *Library) SearchAlbums(query string) ([]map[string]interface{}, error) {
 		WHERE album LIKE ?
 		GROUP BY album_id, album
 		ORDER BY album
-		LIMIT 50
-	`, "%"+query+"%")
+		LIMIT ? OFFSET ?
+	`, "%"+query+"%", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search albums: %w", err)
 	}
@@ -234,16 +234,16 @@ func (l *Library) SearchAlbums(query string) ([]map[string]interface{}, error) {
 	return results, rows.Err()
 }
 
-// SearchArtists searches for distinct artists by name
-func (l *Library) SearchArtists(query string) ([]map[string]interface{}, error) {
+// SearchArtists searches for distinct artists by name, with pagination.
+func (l *Library) SearchArtists(query string, limit, offset int) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
 		SELECT artist, MIN(COALESCE(cover_art, '')), COUNT(DISTINCT album_id) as album_count
 		FROM songs
 		WHERE artist LIKE ?
 		GROUP BY artist
 		ORDER BY artist
-		LIMIT 50
-	`, "%"+query+"%")
+		LIMIT ? OFFSET ?
+	`, "%"+query+"%", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search artists: %w", err)
 	}
@@ -498,16 +498,16 @@ func (l *Library) GenresOfTrackIDs(trackIDs []string) []string {
 	return genres
 }
 
-// SearchGenres returns distinct genres matching the query, with track counts.
-func (l *Library) SearchGenres(query string) ([]map[string]interface{}, error) {
+// SearchGenres returns distinct genres matching the query, with track counts, paginated.
+func (l *Library) SearchGenres(query string, limit, offset int) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
 		SELECT genre, COUNT(*) as track_count
 		FROM songs
 		WHERE genre != '' AND LOWER(genre) LIKE LOWER(?)
 		GROUP BY genre
 		ORDER BY track_count DESC, genre
-		LIMIT 50
-	`, "%"+query+"%")
+		LIMIT ? OFFSET ?
+	`, "%"+query+"%", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search genres: %w", err)
 	}

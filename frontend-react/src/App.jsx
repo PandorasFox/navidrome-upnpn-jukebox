@@ -72,25 +72,43 @@ function App() {
     setDrillDown(null);
 
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    let cancelled = false;
+    const PAGE_SIZE = 100;
+    const resultKey =
+      searchMode === 'albums' ? 'albums' :
+      searchMode === 'artists' ? 'artists' :
+      searchMode === 'genres' ? 'genres' : 'tracks';
+    const url = searchMode === 'genres'
+      ? (offset) => `${API}/genres?q=${encodeURIComponent(searchQuery)}&limit=${PAGE_SIZE}&offset=${offset}`
+      : (offset) => `${API}/search?q=${encodeURIComponent(searchQuery)}&type=${searchMode}&limit=${PAGE_SIZE}&offset=${offset}`;
+
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        if (searchMode === 'genres') {
-          const res = await fetch(`${API}/genres?q=${encodeURIComponent(searchQuery)}`);
+        let offset = 0;
+        let firstPage = true;
+        while (!cancelled) {
+          const res = await fetch(url(offset));
+          if (cancelled) return;
           const data = await res.json();
-          setSearchResults(data.genres || []);
-          return;
+          const page = data[resultKey] || [];
+          if (firstPage) {
+            setSearchResults(page);
+            firstPage = false;
+          } else if (page.length > 0) {
+            setSearchResults((prev) => [...prev, ...page]);
+          }
+          if (!data.hasMore || page.length === 0) break;
+          offset = data.nextOffset ?? offset + page.length;
         }
-        const res = await fetch(`${API}/search?q=${encodeURIComponent(searchQuery)}&type=${searchMode}`);
-        const data = await res.json();
-        if (searchMode === 'albums') setSearchResults(data.albums || []);
-        else if (searchMode === 'artists') setSearchResults(data.artists || []);
-        else setSearchResults(data.tracks || []);
       } catch (err) {
-        console.error('Search failed:', err);
+        if (!cancelled) console.error('Search failed:', err);
       }
     }, 300);
 
-    return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
+    return () => {
+      cancelled = true;
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
   }, [searchQuery, searchMode]);
 
   const addTrack = async (track) => {
@@ -222,6 +240,8 @@ function App() {
     tracks.map((track) => (
       <div key={track.id} className="result-item" onClick={() => addTrack(track)}>
         <img src={`${API}/cover/${track.coverArt}`} alt="" className="result-art"
+          loading="lazy" decoding="async"
+          onLoad={(e) => (e.target.style.display = '')}
           onError={(e) => (e.target.style.display = 'none')} />
         <div className="result-info">
           <div className="result-title">{track.title}</div>
@@ -240,6 +260,8 @@ function App() {
       {albums.map((album) => (
         <div key={album.albumId} className="tile" onClick={() => onAlbumClick(album)}>
           <img src={`${API}/cover/${album.coverArt}`} alt="" className="tile-art"
+            loading="lazy" decoding="async"
+            onLoad={(e) => (e.target.style.visibility = '')}
             onError={(e) => (e.target.style.visibility = 'hidden')} />
           <div className="tile-label">{album.album}</div>
           <div className="tile-sub">{album.artist} · {album.trackCount} tracks</div>
@@ -253,6 +275,8 @@ function App() {
       {artists.map((artist) => (
         <div key={artist.artist} className="tile" onClick={() => drillIntoArtist(artist)}>
           <img src={`${API}/cover/${artist.coverArt}`} alt="" className="tile-art"
+            loading="lazy" decoding="async"
+            onLoad={(e) => (e.target.style.visibility = '')}
             onError={(e) => (e.target.style.visibility = 'hidden')} />
           <div className="tile-label">{artist.artist}</div>
           <div className="tile-sub">{artist.albumCount} {artist.albumCount === 1 ? 'album' : 'albums'}</div>
@@ -285,6 +309,8 @@ function App() {
               setDrillDown(drillDown.parentDrill || null);
             }}>←</button>
             <img src={`${API}/cover/${album.coverArt}`} alt="" className="drill-art"
+              decoding="async"
+              onLoad={(e) => (e.target.style.display = '')}
               onError={(e) => (e.target.style.display = 'none')} />
             <div className="drill-info">
               <div className="drill-title">{album.album}</div>
@@ -450,6 +476,8 @@ function App() {
             src={`${API}/cover/${currentTrack.coverArt}`}
             alt=""
             className="now-playing-art"
+            decoding="async"
+            onLoad={(e) => (e.target.style.display = '')}
             onError={(e) => (e.target.style.display = 'none')}
           />
           <div className="now-playing-info">
@@ -554,6 +582,8 @@ function App() {
               >
                 <span className="drag-handle">⠿</span>
                 <img src={`${API}/cover/${track.coverArt}`} alt="" className="queue-art"
+                  loading="lazy" decoding="async"
+                  onLoad={(e) => (e.target.style.display = '')}
                   onError={(e) => (e.target.style.display = 'none')} />
                 <div className="queue-info">
                   <div className="queue-track-title">{track.title}</div>

@@ -502,49 +502,70 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, fmt.Sprintf("frontend/assets/%s", path))
 }
 
-// handleSearch handles track and album search
+// parsePagination reads limit/offset from the query string with sane defaults and caps.
+func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
+	limit = defaultLimit
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	return
+}
+
+// handleSearch handles track, album, and artist search with pagination.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
-	searchType := r.URL.Query().Get("type") // "tracks" (default) or "albums"
-	log.Printf("[search] query=%q type=%q", query, searchType)
+	searchType := r.URL.Query().Get("type") // "tracks" (default), "albums", "artists"
+	limit, offset := parsePagination(r, 100, 500)
+	log.Printf("[search] query=%q type=%q limit=%d offset=%d", query, searchType, limit, offset)
 
 	w.Header().Set("Content-Type", "application/json")
 
+	key := "tracks"
+	switch searchType {
+	case "albums":
+		key = "albums"
+	case "artists":
+		key = "artists"
+	}
+
 	if query == "" {
-		switch searchType {
-		case "albums":
-			w.Write([]byte("{\"albums\":[]}"))
-		case "artists":
-			w.Write([]byte("{\"artists\":[]}"))
-		default:
-			w.Write([]byte("{\"tracks\":[]}"))
-		}
+		json.NewEncoder(w).Encode(map[string]interface{}{key: []map[string]interface{}{}, "hasMore": false, "nextOffset": offset})
 		return
 	}
 
+	var results []map[string]interface{}
+	var err error
 	switch searchType {
 	case "albums":
-		results, err := s.lib.SearchAlbums(query)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string][]map[string]interface{}{"albums": results})
+		results, err = s.lib.SearchAlbums(query, limit, offset)
 	case "artists":
-		results, err := s.lib.SearchArtists(query)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string][]map[string]interface{}{"artists": results})
+		results, err = s.lib.SearchArtists(query, limit, offset)
 	default:
-		results, err := s.lib.Search(query)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string][]map[string]interface{}{"tracks": results})
+		results, err = s.lib.Search(query, limit, offset)
 	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+	hasMore := len(results) == limit
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		key:          results,
+		"hasMore":    hasMore,
+		"nextOffset": offset + len(results),
+	})
 }
 
 // handleArtistAlbums returns albums by a given artist
@@ -1069,10 +1090,11 @@ func searchTrackToQueueItem(t models.SearchTrack) models.QueueItem {
 	}
 }
 
-// handleSearchGenres returns distinct genres matching the query string.
+// handleSearchGenres returns distinct genres matching the query string, paginated.
 func (s *Server) handleSearchGenres(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	results, err := s.lib.SearchGenres(q)
+	limit, offset := parsePagination(r, 100, 500)
+	results, err := s.lib.SearchGenres(q, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1080,8 +1102,13 @@ func (s *Server) handleSearchGenres(w http.ResponseWriter, r *http.Request) {
 	if results == nil {
 		results = []map[string]interface{}{}
 	}
+	hasMore := len(results) == limit
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"genres": results})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"genres":     results,
+		"hasMore":    hasMore,
+		"nextOffset": offset + len(results),
+	})
 }
 
 // handleGenreTracks returns all tracks with the given genre.
