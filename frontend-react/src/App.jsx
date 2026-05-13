@@ -7,7 +7,9 @@ function App() {
   const [queue, setQueue] = useState([]);
   const [nowPlaying, setNowPlaying] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [renderer, setRenderer] = useState({ position: 0, duration: 0, transportState: '' });
+  const [renderer, setRenderer] = useState({ position: 0, duration: 0, transportState: '', volume: 0 });
+  const [volumeDraft, setVolumeDraft] = useState(null); // local override while user is dragging
+  const volumeTimerRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState('tracks');
   const [searchResults, setSearchResults] = useState([]);
@@ -222,6 +224,25 @@ function App() {
   const stop = () => fetch(`${API}/stop`, { method: 'POST' });
   const next = () => fetch(`${API}/next`, { method: 'POST' });
   const clearQueue = () => fetch(`${API}/queue/clear`, { method: 'POST' });
+
+  const onVolumeInput = (e) => {
+    const v = parseInt(e.target.value, 10);
+    setVolumeDraft(v);
+    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
+    volumeTimerRef.current = setTimeout(() => {
+      fetch(`${API}/volume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ volume: v }),
+      }).catch(() => {}).finally(() => {
+        // Release local override after a short delay so the next SSE tick
+        // (which may still report the pre-change value) doesn't snap back.
+        setTimeout(() => setVolumeDraft(null), 800);
+      });
+    }, 150);
+  };
+
+  const volumeValue = volumeDraft != null ? volumeDraft : (renderer.volume ?? 0);
 
   const formatDuration = (seconds) => {
     const m = Math.floor(seconds / 60);
@@ -511,6 +532,19 @@ function App() {
         )}
         <button className="btn" onClick={stop}>⏹ Stop</button>
         <button className="btn" onClick={next} disabled={queue.length === 0}>⏭ Next</button>
+        <label className="volume-control" title={`Volume: ${volumeValue}`}>
+          <span className="volume-icon" aria-hidden="true">🔊</span>
+          <input
+            type="range"
+            className="volume-slider"
+            min="0"
+            max="100"
+            value={volumeValue}
+            onChange={onVolumeInput}
+            disabled={upnpStatus !== 'connected'}
+          />
+          <span className="volume-value">{volumeValue}</span>
+        </label>
         <button className="btn danger" onClick={clearQueue} disabled={queue.length === 0}>🗑 Clear</button>
       </div>
 

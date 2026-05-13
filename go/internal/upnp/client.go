@@ -341,6 +341,8 @@ const (
 	ActionSetAVTransportURI     TransportAction = "SetAVTransportURI"
 	ActionSetNextAVTransportURI TransportAction = "SetNextAVTransportURI"
 	ActionGetPositionInfo       TransportAction = "GetPositionInfo"
+	ActionGetVolume             TransportAction = "GetVolume"
+	ActionSetVolume             TransportAction = "SetVolume"
 )
 
 // ControlPoint handles AVTransport control
@@ -393,6 +395,45 @@ func (cp *ControlPoint) SetNextAVTransportURI(instanceID string, uri, meta strin
 		"InstanceID":      instanceID,
 		"NextURI":         uri,
 		"NextURIMetaData": meta,
+	})
+}
+
+// GetVolume returns the current master volume on the renderer (0-100).
+func (cp *ControlPoint) GetVolume(instanceID string) (int, error) {
+	resp, err := cp.actionWithResponse(ActionGetVolume, map[string]string{
+		"InstanceID": instanceID,
+		"Channel":    "Master",
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	open := "<CurrentVolume>"
+	close := "</CurrentVolume>"
+	if idx := strings.Index(resp, open); idx >= 0 {
+		start := idx + len(open)
+		end := strings.Index(resp[start:], close)
+		if end > 0 {
+			var v int
+			fmt.Sscanf(resp[start:start+end], "%d", &v)
+			return v, nil
+		}
+	}
+	return 0, fmt.Errorf("CurrentVolume not found in GetVolume response")
+}
+
+// SetVolume sets the master volume on the renderer (0-100).
+func (cp *ControlPoint) SetVolume(instanceID string, volume int) error {
+	if volume < 0 {
+		volume = 0
+	}
+	if volume > 100 {
+		volume = 100
+	}
+	return cp.action(ActionSetVolume, map[string]string{
+		"InstanceID":    instanceID,
+		"Channel":       "Master",
+		"DesiredVolume": fmt.Sprintf("%d", volume),
 	})
 }
 

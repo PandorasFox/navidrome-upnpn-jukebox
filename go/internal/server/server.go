@@ -139,6 +139,10 @@ func (s *Server) pickUpRendererState() {
 	}
 	posInfo.TransportState = transportState
 
+	if vol, volErr := control.GetVolume("0"); volErr == nil {
+		posInfo.Volume = vol
+	}
+
 	// Derive nowPlaying from the renderer's current URI
 	if posInfo.CurrentURI != "" {
 		trackID := extractTrackID(posInfo.CurrentURI)
@@ -230,6 +234,10 @@ func (s *Server) StartPlaybackLoop() {
 				posInfo = &models.PlaybackState{}
 			}
 			posInfo.TransportState = transportState
+
+			if vol, volErr := control.GetVolume("0"); volErr == nil {
+				posInfo.Volume = vol
+			}
 
 			// --- Sync nowPlaying from renderer's current URI ---
 			if posInfo.CurrentURI != "" {
@@ -467,6 +475,7 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/stop", s.handleStop)
 		r.Post("/next", s.handleNext)
 		r.Post("/seek/{idx}", s.handleSeek)
+		r.Post("/volume", s.handleVolume)
 		r.Get("/sse", s.handleSSE)
 		r.Get("/cover/{id}", s.handleCoverArt)
 		r.Get("/sync/status", s.handleSyncStatus)
@@ -827,6 +836,34 @@ func (s *Server) handleSeek(w http.ResponseWriter, r *http.Request) {
 	s.queueEngine.SetRunning(true)
 	if err := s.playTrack(&track); err != nil {
 		log.Printf("Error playing track: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{\"ok\":true}"))
+}
+
+// handleVolume sets the renderer's master volume (0-100).
+func (s *Server) handleVolume(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Volume int `json:"volume"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.upnpMu.RLock()
+	control := s.upnpControl
+	s.upnpMu.RUnlock()
+	if control == nil {
+		http.Error(w, "upnp not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := control.SetVolume("0", req.Volume); err != nil {
+		log.Printf("[volume] set failed: %v", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
