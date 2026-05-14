@@ -992,13 +992,65 @@ func (s *Server) radioFill() {
 	}
 
 	queueSnap := s.queueEngine.QueueSnapshot()
+	recent := s.queueEngine.RecentIDs()
 	useSimilarity := cfg.SimilarSongs || cfg.SimilarArtists || cfg.SimilarGenres
+
+	// pickRandomFresh draws up to want random tracks, skipping anything in
+	// hardExclude (queue/now-playing dupes) and, on the first pass, anything
+	// in softExclude (recency cache). Falls back to softExclude-permitted
+	// picks only if the strict pass underdelivered — with 100k+ libraries
+	// that fallback should basically never fire.
+	pickRandomFresh := func(want int, hardExclude, softExclude map[string]struct{}) []models.QueueItem {
+		if want <= 0 {
+			return nil
+		}
+		out := make([]models.QueueItem, 0, want)
+		taken := make(map[string]struct{}, want)
+		for _, t := range s.lib.GetRandomTracks(want * 4) {
+			if _, ok := hardExclude[t.ID]; ok {
+				continue
+			}
+			if _, ok := softExclude[t.ID]; ok {
+				continue
+			}
+			if _, ok := taken[t.ID]; ok {
+				continue
+			}
+			out = append(out, t)
+			taken[t.ID] = struct{}{}
+			if len(out) >= want {
+				return out
+			}
+		}
+		if len(out) < want {
+			for _, t := range s.lib.GetRandomTracks(want * 2) {
+				if _, ok := hardExclude[t.ID]; ok {
+					continue
+				}
+				if _, ok := taken[t.ID]; ok {
+					continue
+				}
+				out = append(out, t)
+				taken[t.ID] = struct{}{}
+				if len(out) >= want {
+					break
+				}
+			}
+		}
+		return out
+	}
+
+	queued := make(map[string]struct{}, len(queueSnap))
+	for _, q := range queueSnap {
+		queued[q.ID] = struct{}{}
+	}
+
 	if !useSimilarity || len(queueSnap) == 0 {
-		tracks := s.lib.GetRandomTracks(batch)
+		tracks := pickRandomFresh(batch, queued, recent)
 		for _, t := range tracks {
 			s.queueEngine.Add(t)
 		}
-		log.Printf("[radio] added %d random tracks to queue", len(tracks))
+		log.Printf("[radio] added %d random tracks (queued=%d recent=%d excluded)", len(tracks), len(queued), len(recent))
 		return
 	}
 
@@ -1009,9 +1061,14 @@ func (s *Server) radioFill() {
 		seeds = seeds[:maxSeeds]
 	}
 
-	already := make(map[string]struct{}, len(queueSnap))
+	// `already` excludes both queued tracks (so we don't dupe) and recent
+	// tracks (so we don't loop back into the last 6h of listening).
+	already := make(map[string]struct{}, len(queueSnap)+len(recent))
 	for _, q := range queueSnap {
 		already[q.ID] = struct{}{}
+	}
+	for id := range recent {
+		already[id] = struct{}{}
 	}
 
 	candidates := make([]models.QueueItem, 0, batch*4)
@@ -1069,11 +1126,11 @@ func (s *Server) radioFill() {
 	}
 
 	if len(candidates) == 0 {
-		tracks := s.lib.GetRandomTracks(batch)
+		tracks := pickRandomFresh(batch, queued, recent)
 		for _, t := range tracks {
 			s.queueEngine.Add(t)
 		}
-		log.Printf("[radio] no similarity candidates found, added %d random tracks", len(tracks))
+		log.Printf("[radio] no similarity candidates found, added %d random tracks (recent=%d excluded)", len(tracks), len(recent))
 		return
 	}
 
@@ -1090,22 +1147,15 @@ func (s *Server) radioFill() {
 	}
 
 	// Top up with random library tracks if similarity didn't yield enough.
+	// `already` already covers queued + recent + chosen similar candidates.
 	if pick < batch {
 		need := batch - pick
-		extras := s.lib.GetRandomTracks(need * 2)
-		added := 0
+		extras := pickRandomFresh(need, already, nil)
 		for _, t := range extras {
-			if _, ok := already[t.ID]; ok {
-				continue
-			}
 			already[t.ID] = struct{}{}
 			s.queueEngine.Add(t)
-			added++
-			if added >= need {
-				break
-			}
 		}
-		log.Printf("[radio] added %d similar + %d random tracks", pick, added)
+		log.Printf("[radio] added %d similar + %d random tracks (recent=%d excluded)", pick, len(extras), len(recent))
 		return
 	}
 

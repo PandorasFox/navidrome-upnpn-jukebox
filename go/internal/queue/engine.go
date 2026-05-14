@@ -18,6 +18,10 @@ const (
 	defaultBatchSize      = 10
 )
 
+// How long a track stays in the "recently played" exclusion window used by
+// radio fill. In-memory only — restarts wipe it, which is acceptable.
+const recencyWindow = 6 * time.Hour
+
 func defaultRadioConfig() models.RadioConfig {
 	return models.RadioConfig{
 		Enabled:        false,
@@ -39,6 +43,10 @@ type Engine struct {
 	renderer   models.PlaybackState
 	upnpStatus string
 	db         *sql.DB
+
+	// recent maps trackID -> time it last became nowPlaying. Used to suppress
+	// re-queueing recently-heard songs in radio fill.
+	recent map[string]time.Time
 
 	// Called when radio mode is on and queue depth <= threshold.
 	// Always invoked off the request goroutine because fills can hit Navidrome
@@ -113,6 +121,7 @@ func NewEngine(dbPath string) (*Engine, error) {
 		radioCfg:    defaultRadioConfig(),
 		db:          db,
 		subscribers: make(map[chan []byte]struct{}),
+		recent:      make(map[string]time.Time),
 	}
 
 	if err := e.loadQueue(); err != nil {
@@ -355,12 +364,39 @@ func (e *Engine) NowPlaying() *models.QueueItem {
 	return e.nowPlaying
 }
 
-// SetNowPlaying sets the currently playing track (derived from renderer state)
+// SetNowPlaying sets the currently playing track (derived from renderer state).
+// Also stamps the track's ID into the recency cache so radio fill won't
+// re-queue it within the recencyWindow.
 func (e *Engine) SetNowPlaying(item *models.QueueItem) {
 	e.mu.Lock()
 	e.nowPlaying = item
+	if item != nil && item.ID != "" {
+		e.recent[item.ID] = time.Now()
+	}
 	e.broadcastLocked()
 	e.mu.Unlock()
+}
+
+// RecentIDs returns the set of trackIDs played within recencyWindow.
+// Prunes expired entries as a side effect.
+func (e *Engine) RecentIDs() map[string]struct{} {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cutoff := time.Now().Add(-recencyWindow)
+	out := make(map[string]struct{}, len(e.recent))
+	for id, t := range e.recent {
+		if t.Before(cutoff) {
+			delete(e.recent, id)
+			continue
+		}
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+// RecentCount returns how many tracks are currently in the recency window.
+func (e *Engine) RecentCount() int {
+	return len(e.RecentIDs())
 }
 
 // IsRunning returns whether playback is active
