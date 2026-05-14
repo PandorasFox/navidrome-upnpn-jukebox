@@ -683,22 +683,35 @@ body {
   transform: translateX(4px);
 }
 
-.queue-item[draggable] {
-  cursor: grab;
-}
-
-.queue-item[draggable]:active {
+.queue-item-dragging {
   cursor: grabbing;
-  opacity: 0.7;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* The handle is a real button so touch devices get a proper, 44px hit area
+   (Apple HIG / Material guideline) without affecting the visible glyph. */
 .drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 44px;
+  padding: 0;
+  margin: -6px 0;
+  background: transparent;
+  border: none;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: 18px;
+  letter-spacing: 2px;
   cursor: grab;
   user-select: none;
+  touch-action: none; /* dnd-kit needs this to claim touch gestures */
   flex-shrink: 0;
-  letter-spacing: 2px;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  color: var(--text-primary);
 }
 
 .queue-art {

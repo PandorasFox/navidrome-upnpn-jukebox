@@ -1,7 +1,60 @@
 import { useState, useEffect, useRef } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import './App.css';
 
 const API = '/api';
+
+// Stable client-side id for a queue entry. Two insertions of the same
+// track ID are disambiguated by addedAt (set server-side at queue time).
+const itemKey = (track) => `${track.id}::${track.addedAt || ''}`;
+
+function SortableQueueItem({ id, track, idx, formatDuration, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 2 : undefined,
+    opacity: isDragging ? 0.85 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style}
+      className={`queue-item${isDragging ? ' queue-item-dragging' : ''}`}>
+      <button
+        type="button"
+        className="drag-handle"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >⠿</button>
+      <img src={`${API}/cover/${track.coverArt}`} alt="" className="queue-art"
+        loading="lazy" decoding="async"
+        onLoad={(e) => (e.target.style.display = '')}
+        onError={(e) => (e.target.style.display = 'none')} />
+      <div className="queue-info">
+        <div className="queue-track-title">{track.title}</div>
+        <div className="queue-artist">{track.artist} — {track.album}</div>
+      </div>
+      <div className="queue-duration">{formatDuration(track.duration)}</div>
+      <button className="remove-btn" onClick={() => onRemove(idx)} title="Remove">✕</button>
+    </div>
+  );
+}
 
 function App() {
   const [queue, setQueue] = useState([]);
@@ -169,31 +222,40 @@ function App() {
     await fetch(`${API}/queue/${idx}`, { method: 'DELETE' });
   };
 
-  const dragItem = useRef(null);
-  const dragOverItem = useRef(null);
+  // Local override that takes precedence over the SSE-driven queue while a
+  // reorder is in flight, so the dropped item doesn't snap back before the
+  // server's SSE update arrives.
+  const [queueOverride, setQueueOverride] = useState(null);
+  const displayQueue = queueOverride ?? queue;
 
-  const handleDragStart = (idx, trackId) => {
-    dragItem.current = { idx, trackId };
-  };
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  const handleDragOver = (e, idx) => {
-    e.preventDefault();
-    dragOverItem.current = idx;
-  };
+  const handleQueueDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = displayQueue.findIndex((t) => itemKey(t) === active.id);
+    const to = displayQueue.findIndex((t) => itemKey(t) === over.id);
+    if (from < 0 || to < 0 || from === to) return;
 
-  const handleDrop = async (e) => {
-    e.preventDefault();
-    if (dragItem.current === null || dragOverItem.current === null) return;
-    const { idx: from, trackId } = dragItem.current;
-    const to = dragOverItem.current;
-    if (from === to) return;
-    await fetch(`${API}/queue/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, trackId }),
-    });
-    dragItem.current = null;
-    dragOverItem.current = null;
+    const moved = displayQueue[from];
+    setQueueOverride(arrayMove(displayQueue, from, to));
+
+    try {
+      await fetch(`${API}/queue/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to, trackId: moved.id }),
+      });
+    } finally {
+      // Either way, drop the override on the next tick so the SSE-driven
+      // queue takes back over. The server's broadcast typically lands
+      // within tens of ms, so the visible state stays correct.
+      setTimeout(() => setQueueOverride(null), 150);
+    }
   };
 
   const radioPostTimer = useRef(null);
@@ -614,31 +676,32 @@ function App() {
           Up Next ({queue.length} {queue.length === 1 ? 'track' : 'tracks'})
         </h2>
 
-        {queue.length === 0 ? (
+        {displayQueue.length === 0 ? (
           <div className="empty-message">Queue is empty. Search and add tracks!</div>
         ) : (
-          <div className="queue">
-            {queue.map((track, idx) => (
-              <div key={`${track.id}-${idx}`} className="queue-item"
-                draggable
-                onDragStart={() => handleDragStart(idx, track.id)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDrop={handleDrop}
-              >
-                <span className="drag-handle">⠿</span>
-                <img src={`${API}/cover/${track.coverArt}`} alt="" className="queue-art"
-                  loading="lazy" decoding="async"
-                  onLoad={(e) => (e.target.style.display = '')}
-                  onError={(e) => (e.target.style.display = 'none')} />
-                <div className="queue-info">
-                  <div className="queue-track-title">{track.title}</div>
-                  <div className="queue-artist">{track.artist} — {track.album}</div>
-                </div>
-                <div className="queue-duration">{formatDuration(track.duration)}</div>
-                <button className="remove-btn" onClick={() => removeTrack(idx)} title="Remove">✕</button>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleQueueDragEnd}
+          >
+            <SortableContext
+              items={displayQueue.map((t) => itemKey(t))}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="queue">
+                {displayQueue.map((track, idx) => (
+                  <SortableQueueItem
+                    key={itemKey(track)}
+                    id={itemKey(track)}
+                    track={track}
+                    idx={idx}
+                    formatDuration={formatDuration}
+                    onRemove={removeTrack}
+                  />
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+          </DndContext>
         )}
 
         {radioFilling && (
