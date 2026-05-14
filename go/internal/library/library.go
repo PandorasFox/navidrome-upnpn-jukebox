@@ -351,7 +351,8 @@ func (l *Library) GetAlbumTracks(albumID string) ([]map[string]interface{}, erro
 // GetRandomTracks returns n random tracks from the library
 func (l *Library) GetRandomTracks(n int) []models.QueueItem {
 	rows, err := l.db.Query(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''),
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs ORDER BY RANDOM() LIMIT ?
 	`, n)
 	if err != nil {
@@ -363,7 +364,7 @@ func (l *Library) GetRandomTracks(n int) []models.QueueItem {
 	var tracks []models.QueueItem
 	for rows.Next() {
 		var item models.QueueItem
-		if err := rows.Scan(&item.ID, &item.Title, &item.Artist, &item.Album, &item.Duration, &item.CoverArt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Artist, &item.Album, &item.Duration, &item.CoverArt, &item.Suffix, &item.BitRate); err != nil {
 			continue
 		}
 		tracks = append(tracks, item)
@@ -373,12 +374,13 @@ func (l *Library) GetRandomTracks(n int) []models.QueueItem {
 
 // GetTrackByID looks up a single track by its Navidrome ID
 func (l *Library) GetTrackByID(trackID string) *models.QueueItem {
-	var id, title, artist, album, coverArt string
-	var duration int
+	var id, title, artist, album, coverArt, suffix string
+	var duration, bitRate int
 	err := l.db.QueryRow(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''),
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs WHERE id = ?
-	`, trackID).Scan(&id, &title, &artist, &album, &duration, &coverArt)
+	`, trackID).Scan(&id, &title, &artist, &album, &duration, &coverArt, &suffix, &bitRate)
 	if err != nil {
 		return nil
 	}
@@ -389,6 +391,8 @@ func (l *Library) GetTrackByID(trackID string) *models.QueueItem {
 		Album:    album,
 		Duration: duration,
 		CoverArt: coverArt,
+		Suffix:   suffix,
+		BitRate:  bitRate,
 	}
 }
 
@@ -413,7 +417,8 @@ func (l *Library) GetRandomTracksByArtists(artists []string, n int) []models.Que
 	placeholders := strings.Repeat("?,", len(artists))
 	placeholders = placeholders[:len(placeholders)-1]
 	query := fmt.Sprintf(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''),
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs WHERE artist IN (%s) ORDER BY RANDOM() LIMIT ?
 	`, placeholders)
 	args := make([]interface{}, 0, len(artists)+1)
@@ -430,7 +435,7 @@ func (l *Library) GetRandomTracksByArtists(artists []string, n int) []models.Que
 	var tracks []models.QueueItem
 	for rows.Next() {
 		var t models.QueueItem
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.CoverArt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.CoverArt, &t.Suffix, &t.BitRate); err != nil {
 			continue
 		}
 		tracks = append(tracks, t)
@@ -453,7 +458,8 @@ func (l *Library) GetRandomTracksByGenres(genres []string, n int) []models.Queue
 	placeholders := strings.Repeat("?,", len(clean))
 	placeholders = placeholders[:len(placeholders)-1]
 	query := fmt.Sprintf(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''),
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs WHERE genre IN (%s) ORDER BY RANDOM() LIMIT ?
 	`, placeholders)
 	args := make([]interface{}, 0, len(clean)+1)
@@ -470,7 +476,7 @@ func (l *Library) GetRandomTracksByGenres(genres []string, n int) []models.Queue
 	var tracks []models.QueueItem
 	for rows.Next() {
 		var t models.QueueItem
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.CoverArt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.CoverArt, &t.Suffix, &t.BitRate); err != nil {
 			continue
 		}
 		tracks = append(tracks, t)

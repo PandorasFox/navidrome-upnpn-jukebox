@@ -102,6 +102,8 @@ func NewEngine(dbPath string) (*Engine, error) {
 			year INTEGER,
 			duration INTEGER NOT NULL,
 			cover_art TEXT,
+			suffix TEXT DEFAULT '',
+			bit_rate INTEGER DEFAULT 0,
 			added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			position INTEGER NOT NULL
 		);
@@ -114,6 +116,9 @@ func NewEngine(dbPath string) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
+	// Migrations for older DBs that predate these columns
+	db.Exec(`ALTER TABLE queue ADD COLUMN suffix TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE queue ADD COLUMN bit_rate INTEGER DEFAULT 0`)
 
 	e := &Engine{
 		queue:       make([]models.QueueItem, 0),
@@ -157,7 +162,8 @@ func (e *Engine) loadQueue() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	rows, err := e.db.Query("SELECT track_id, title, artist, album, year, duration, cover_art, position FROM queue ORDER BY position")
+	rows, err := e.db.Query(`SELECT track_id, title, artist, album, year, duration, cover_art,
+		COALESCE(suffix, ''), COALESCE(bit_rate, 0), position FROM queue ORDER BY position`)
 	if err != nil {
 		return err
 	}
@@ -168,7 +174,7 @@ func (e *Engine) loadQueue() error {
 		var item models.QueueItem
 		var year sql.NullInt64
 		var position int
-		err := rows.Scan(&item.ID, &item.Title, &item.Artist, &item.Album, &year, &item.Duration, &item.CoverArt, &position)
+		err := rows.Scan(&item.ID, &item.Title, &item.Artist, &item.Album, &year, &item.Duration, &item.CoverArt, &item.Suffix, &item.BitRate, &position)
 		if err != nil {
 			return err
 		}
@@ -190,7 +196,7 @@ func (e *Engine) saveQueue() error {
 		return err
 	}
 
-	stmt, err := e.db.Prepare("INSERT INTO queue (track_id, title, artist, album, year, duration, cover_art, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := e.db.Prepare("INSERT INTO queue (track_id, title, artist, album, year, duration, cover_art, suffix, bit_rate, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -198,7 +204,7 @@ func (e *Engine) saveQueue() error {
 
 	for i, item := range e.queue {
 		year := sql.NullInt64{Int64: int64(item.Year), Valid: item.Year > 0}
-		_, err := stmt.Exec(item.ID, item.Title, item.Artist, item.Album, year, item.Duration, item.CoverArt, i)
+		_, err := stmt.Exec(item.ID, item.Title, item.Artist, item.Album, year, item.Duration, item.CoverArt, item.Suffix, item.BitRate, i)
 		if err != nil {
 			return err
 		}

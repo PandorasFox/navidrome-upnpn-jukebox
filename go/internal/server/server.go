@@ -660,6 +660,8 @@ func (s *Server) handleAddAlbum(w http.ResponseWriter, r *http.Request) {
 		// Insert in reverse so they stack in correct album order after current track
 		for i := len(tracks) - 1; i >= 0; i-- {
 			t := tracks[i]
+			suffix, _ := t["suffix"].(string)
+			bitRate, _ := t["bitRate"].(int)
 			item := models.QueueItem{
 				ID:       t["id"].(string),
 				Title:    t["title"].(string),
@@ -667,11 +669,15 @@ func (s *Server) handleAddAlbum(w http.ResponseWriter, r *http.Request) {
 				Album:    t["album"].(string),
 				Duration: t["duration"].(int),
 				CoverArt: t["coverArt"].(string),
+				Suffix:   suffix,
+				BitRate:  bitRate,
 			}
 			s.queueEngine.InsertNext(item)
 		}
 	} else {
 		for _, t := range tracks {
+			suffix, _ := t["suffix"].(string)
+			bitRate, _ := t["bitRate"].(int)
 			item := models.QueueItem{
 				ID:       t["id"].(string),
 				Title:    t["title"].(string),
@@ -679,6 +685,8 @@ func (s *Server) handleAddAlbum(w http.ResponseWriter, r *http.Request) {
 				Album:    t["album"].(string),
 				Duration: t["duration"].(int),
 				CoverArt: t["coverArt"].(string),
+				Suffix:   suffix,
+				BitRate:  bitRate,
 			}
 			s.queueEngine.Add(item)
 		}
@@ -1187,6 +1195,8 @@ func searchTrackToQueueItem(t models.SearchTrack) models.QueueItem {
 		Album:    t.Album,
 		Duration: t.Duration,
 		CoverArt: t.CoverArt,
+		Suffix:   t.Suffix,
+		BitRate:  t.BitRate,
 	}
 }
 

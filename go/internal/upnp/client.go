@@ -293,13 +293,61 @@ func resolveControlURL(baseURL, controlURL string) string {
 	return baseURL + controlURL
 }
 
-// DIDLItem creates a DIDL-Lite metadata block for a track
+// mimeForSuffix returns the canonical MIME type for a Navidrome codec
+// suffix. Yamaha (and most DLNA renderers) need a real MIME in protocolInfo
+// to honor the DIDL <dc:title>/<dc:creator>/<upnp:album> fields when
+// rendering the front-panel / HDMI overlay; a wildcard makes them fall back
+// to in-stream tag parsing, which is patchy for FLAC.
+func mimeForSuffix(suffix string) string {
+	switch strings.ToLower(suffix) {
+	case "flac":
+		return "audio/flac"
+	case "mp3":
+		return "audio/mpeg"
+	case "m4a", "mp4", "aac":
+		return "audio/mp4"
+	case "ogg", "oga":
+		return "audio/ogg"
+	case "opus":
+		return "audio/opus"
+	case "wav":
+		return "audio/wav"
+	case "wma":
+		return "audio/x-ms-wma"
+	case "ape":
+		return "audio/x-monkeys-audio"
+	default:
+		// Unknown — fall back to wildcard so we at least set the URI.
+		return "*/*"
+	}
+}
+
+// durationDIDL formats seconds as the UPnP duration string H:MM:SS.000.
+func durationDIDL(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+	h := seconds / 3600
+	m := (seconds % 3600) / 60
+	s := seconds % 60
+	return fmt.Sprintf("%d:%02d:%02d.000", h, m, s)
+}
+
+// DIDLItem creates a DIDL-Lite metadata block for a track.
 func DIDLItem(track models.QueueItem, streamURL string) string {
-	// Wildcard MIME — we stream the original codec (FLAC/MP3/etc) via
-	// Navidrome's format=raw, and renderers detect the actual Content-Type
-	// from the HTTP response headers. Locking this to audio/mpeg was both
-	// inaccurate for non-MP3 sources and unnecessary.
-	protocolInfo := "http-get:*:*:*"
+	mime := mimeForSuffix(track.Suffix)
+	protocolInfo := "http-get:*:" + mime + ":*"
+
+	// res attributes — Yamaha uses these to populate codec/bitrate readouts
+	// on the front panel and HDMI overlay alongside dc:title/dc:creator.
+	resAttrs := fmt.Sprintf(`protocolInfo="%s"`, protocolInfo)
+	if d := durationDIDL(track.Duration); d != "" {
+		resAttrs += fmt.Sprintf(` duration="%s"`, d)
+	}
+	if track.BitRate > 0 {
+		// UPnP spec defines res@bitrate in BYTES per second, not bits.
+		resAttrs += fmt.Sprintf(` bitrate="%d"`, track.BitRate*1000/8)
+	}
 
 	albumArt := ""
 	if track.CoverArt != "" {
@@ -313,7 +361,7 @@ func DIDLItem(track models.QueueItem, streamURL string) string {
     <upnp:artist>%s</upnp:artist>
     <upnp:album>%s</upnp:album>
     <upnp:class>object.item.audioItem.musicTrack</upnp:class>%s
-    <res protocolInfo="%s">%s</res>
+    <res %s>%s</res>
   </item>
 </DIDL-Lite>`,
 		track.ID,
@@ -322,7 +370,7 @@ func DIDLItem(track models.QueueItem, streamURL string) string {
 		escapeXML(track.Artist),
 		escapeXML(track.Album),
 		albumArt,
-		protocolInfo,
+		resAttrs,
 		escapeXML(streamURL))
 }
 

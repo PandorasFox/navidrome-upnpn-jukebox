@@ -13,6 +13,8 @@ type QueueItem struct {
 	Year     int       `json:"year,omitempty"` // Release year
 	Duration int       `json:"duration"`       // Duration in seconds
 	CoverArt string    `json:"coverArt"`       // Cover art ID for URL generation
+	Suffix   string    `json:"suffix"`         // Codec suffix (flac, mp3, …) — drives DIDL MIME
+	BitRate  int       `json:"bitRate"`        // Source bitrate in kbps — surfaced in DIDL <res>
 	AddedAt  time.Time `json:"addedAt"`        // When added to queue
 	AddedBy  string    `json:"addedBy"`        // "system" or username (we'll skip auth for now)
 }
