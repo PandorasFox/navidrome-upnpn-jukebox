@@ -369,7 +369,7 @@ func (s *Server) playTrack(track *models.QueueItem) error {
 	}
 
 	streamURL := s.navidrome.StreamURL(track.ID)
-	log.Printf("[playTrack] setting URI for %q by %s", track.Title, track.Artist)
+	log.Printf("[playTrack] setting URI for %q by %s: %s", track.Title, track.Artist, streamURL)
 
 	// Build DIDL-Lite metadata
 	meta := upnp.DIDLItem(*track, streamURL)
@@ -411,7 +411,7 @@ func (s *Server) queueNextTrack(track *models.QueueItem) error {
 		meta = strings.Replace(meta, fmt.Sprintf("__COVER_ART_%s__", track.CoverArt), coverURL, -1)
 	}
 
-	log.Printf("[queueNext] queuing next: %q by %s", track.Title, track.Artist)
+	log.Printf("[queueNext] queuing next: %q by %s: %s", track.Title, track.Artist, streamURL)
 	return control.SetNextAVTransportURI("0", streamURL, meta)
 }
 
@@ -706,6 +706,16 @@ func (s *Server) handleRemoveFromQueue(w http.ResponseWriter, r *http.Request) {
 // handleClearQueue clears the queue
 func (s *Server) handleClearQueue(w http.ResponseWriter, r *http.Request) {
 	s.queueEngine.Clear()
+	// The renderer may still have a pre-queued next URI from the cleared
+	// queue; wipe it so it doesn't auto-advance to a phantom track.
+	s.upnpMu.RLock()
+	control := s.upnpControl
+	s.upnpMu.RUnlock()
+	if control != nil {
+		if err := control.SetNextAVTransportURI("0", "", ""); err != nil {
+			log.Printf("[clearQueue] failed to clear next URI: %v", err)
+		}
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("{\"ok\":true}"))
 }
@@ -798,6 +808,9 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.upnpMu.RUnlock()
 	if control != nil {
 		control.Stop()
+		if err := control.SetNextAVTransportURI("0", "", ""); err != nil {
+			log.Printf("[stop] failed to clear next URI: %v", err)
+		}
 	}
 	s.queueEngine.Clear()
 	s.queueEngine.SetRunning(false)

@@ -130,8 +130,10 @@ func (c *Client) StreamURL(trackID string) string {
 	params.Set("u", c.username)
 	params.Set("p", c.password)
 	params.Set("id", trackID)
-	params.Set("format", "mp3")
-	params.Set("bitrate", "320")
+	// format=raw → no transcoding; the renderer gets the original file
+	// (FLAC stays FLAC, MP3 stays MP3, etc.). Yamaha sniffs Content-Type
+	// from Navidrome's HTTP response and handles PCM/FLAC natively.
+	params.Set("format", "raw")
 
 	return fmt.Sprintf("%s/rest/stream?%s", c.rendererBaseURL, params.Encode())
 }

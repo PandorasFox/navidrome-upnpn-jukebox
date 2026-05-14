@@ -295,7 +295,11 @@ func resolveControlURL(baseURL, controlURL string) string {
 
 // DIDLItem creates a DIDL-Lite metadata block for a track
 func DIDLItem(track models.QueueItem, streamURL string) string {
-	protocolInfo := "http-get:*:audio/mpeg:*"
+	// Wildcard MIME — we stream the original codec (FLAC/MP3/etc) via
+	// Navidrome's format=raw, and renderers detect the actual Content-Type
+	// from the HTTP response headers. Locking this to audio/mpeg was both
+	// inaccurate for non-MP3 sources and unnecessary.
+	protocolInfo := "http-get:*:*:*"
 
 	albumArt := ""
 	if track.CoverArt != "" {
