@@ -39,7 +39,9 @@ func NewLibrary(dbPath string, client *navidrome.Client) (*Library, error) {
 			track_number INTEGER DEFAULT 0,
 			duration INTEGER DEFAULT 0,
 			cover_art TEXT,
-			genre TEXT DEFAULT ''
+			genre TEXT DEFAULT '',
+			suffix TEXT DEFAULT '',
+			bit_rate INTEGER DEFAULT 0
 		);
 	`)
 	if err != nil {
@@ -51,6 +53,8 @@ func NewLibrary(dbPath string, client *navidrome.Client) (*Library, error) {
 	db.Exec(`ALTER TABLE songs ADD COLUMN album_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE songs ADD COLUMN track_number INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE songs ADD COLUMN genre TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE songs ADD COLUMN suffix TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE songs ADD COLUMN bit_rate INTEGER DEFAULT 0`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_songs_album ON songs(album)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_songs_album_id ON songs(album_id)`)
@@ -130,14 +134,14 @@ func (l *Library) Sync(ctx context.Context, onProgress func(synced int)) error {
 		return fmt.Errorf("failed to clear songs: %w", err)
 	}
 
-	insertStmt, err := tx.Prepare("INSERT OR REPLACE INTO songs (id, title, artist, album, album_id, track_number, duration, cover_art, genre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	insertStmt, err := tx.Prepare("INSERT OR REPLACE INTO songs (id, title, artist, album, album_id, track_number, duration, cover_art, genre, suffix, bit_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert: %w", err)
 	}
 	defer insertStmt.Close()
 
 	for _, song := range allSongs {
-		_, err := insertStmt.Exec(song.ID, song.Title, song.Artist, song.Album, song.AlbumID, song.Track, song.Duration, song.CoverArt, song.Genre)
+		_, err := insertStmt.Exec(song.ID, song.Title, song.Artist, song.Album, song.AlbumID, song.Track, song.Duration, song.CoverArt, song.Genre, song.Suffix, song.BitRate)
 		if err != nil {
 			fmt.Printf("Warning: failed to insert song %s: %v\n", song.Title, err)
 			continue
@@ -159,7 +163,8 @@ func (l *Library) Sync(ctx context.Context, onProgress func(synced int)) error {
 // Search searches for songs by title with pagination.
 func (l *Library) Search(query string, limit, offset int) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, '')
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''),
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs
 		WHERE title LIKE ?
 		ORDER BY
@@ -178,9 +183,9 @@ func (l *Library) Search(query string, limit, offset int) ([]map[string]interfac
 
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id, title, artist, album, coverArt string
-		var duration int
-		if err := rows.Scan(&id, &title, &artist, &album, &duration, &coverArt); err != nil {
+		var id, title, artist, album, coverArt, suffix string
+		var duration, bitRate int
+		if err := rows.Scan(&id, &title, &artist, &album, &duration, &coverArt, &suffix, &bitRate); err != nil {
 			log.Printf("[library.Search] scan error: %v", err)
 			continue
 		}
@@ -191,6 +196,8 @@ func (l *Library) Search(query string, limit, offset int) ([]map[string]interfac
 			"album":    album,
 			"duration": duration,
 			"coverArt": coverArt,
+			"suffix":   suffix,
+			"bitRate":  bitRate,
 		})
 	}
 
@@ -306,7 +313,8 @@ func (l *Library) GetArtistAlbums(artist string) ([]map[string]interface{}, erro
 // GetAlbumTracks returns all tracks for an album, ordered by track number
 func (l *Library) GetAlbumTracks(albumID string) ([]map[string]interface{}, error) {
 	rows, err := l.db.Query(`
-		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''), track_number
+		SELECT id, title, artist, album, COALESCE(duration, 0), COALESCE(cover_art, ''), track_number,
+		       COALESCE(suffix, ''), COALESCE(bit_rate, 0)
 		FROM songs
 		WHERE album_id = ?
 		ORDER BY track_number, title
@@ -318,9 +326,9 @@ func (l *Library) GetAlbumTracks(albumID string) ([]map[string]interface{}, erro
 
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id, title, artist, album, coverArt string
-		var duration, trackNumber int
-		if err := rows.Scan(&id, &title, &artist, &album, &duration, &coverArt, &trackNumber); err != nil {
+		var id, title, artist, album, coverArt, suffix string
+		var duration, trackNumber, bitRate int
+		if err := rows.Scan(&id, &title, &artist, &album, &duration, &coverArt, &trackNumber, &suffix, &bitRate); err != nil {
 			log.Printf("[library.GetAlbumTracks] scan error: %v", err)
 			continue
 		}
@@ -332,6 +340,8 @@ func (l *Library) GetAlbumTracks(albumID string) ([]map[string]interface{}, erro
 			"duration": duration,
 			"coverArt": coverArt,
 			"track":    trackNumber,
+			"suffix":   suffix,
+			"bitRate":  bitRate,
 		})
 	}
 

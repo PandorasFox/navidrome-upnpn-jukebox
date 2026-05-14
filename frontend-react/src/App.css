@@ -233,6 +233,13 @@ body {
   font-weight: 500;
 }
 
+.result-format {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .add-btn {
   width: 28px;
   height: 28px;

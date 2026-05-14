@@ -89,6 +89,8 @@ type SearchTrack struct {
 	Duration int    `xml:"duration,attr" json:"duration"`
 	CoverArt string `xml:"coverArt,attr" json:"coverArt"`
 	Genre    string `xml:"genre,attr" json:"genre"`
+	Suffix   string `xml:"suffix,attr" json:"suffix"`
+	BitRate  int    `xml:"bitRate,attr" json:"bitRate"`
 }
 
 // SimilarSongsResponse matches /rest/getSimilarSongs

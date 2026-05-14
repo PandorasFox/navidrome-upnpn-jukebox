@@ -250,6 +250,12 @@ function App() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const formatCodec = (track) => {
+    const codec = (track.suffix || '').toLowerCase();
+    if (!codec) return '';
+    return track.bitRate > 0 ? `${codec} · ${track.bitRate} kbps` : codec;
+  };
+
   const currentTrack = nowPlaying;
   const showResults = searchResults.length > 0 || drillDown;
   const progressReset = renderer.position < prevPositionRef.current - 2;
@@ -270,7 +276,12 @@ function App() {
             {showAlbum ? `${track.artist} — ${track.album}` : track.artist}
           </div>
         </div>
-        {track.duration > 0 && <div className="result-duration">{formatDuration(track.duration)}</div>}
+        {(track.duration > 0 || track.suffix) && (
+          <div className="result-meta">
+            {track.duration > 0 && <div className="result-duration">{formatDuration(track.duration)}</div>}
+            {track.suffix && <div className="result-format">{formatCodec(track)}</div>}
+          </div>
+        )}
         <button className="add-btn">+</button>
       </div>
     ))
